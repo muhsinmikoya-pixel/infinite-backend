@@ -5,6 +5,13 @@ const app = express();
 
 app.use(express.json());
 
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  next();
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
@@ -12,13 +19,11 @@ app.get("/", (req, res) => {
 });
 
 async function getAccessToken() {
-
-  const credentials =
-    Buffer.from(
-      process.env.CONSUMER_KEY +
-      ":" +
-      process.env.CONSUMER_SECRET
-    ).toString("base64");
+  const credentials = Buffer.from(
+    process.env.CONSUMER_KEY +
+    ":" +
+    process.env.CONSUMER_SECRET
+  ).toString("base64");
 
   const response = await axios.get(
     "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
@@ -33,9 +38,7 @@ async function getAccessToken() {
 }
 
 app.post("/pay", async (req, res) => {
-
   try {
-
     const { phone } = req.body;
 
     if (!phone) {
@@ -50,7 +53,7 @@ app.post("/pay", async (req, res) => {
     const timestamp = new Date()
       .toISOString()
       .replace(/[-:TZ.]/g, "")
-      .slice(0,14);
+      .slice(0, 14);
 
     const password = Buffer.from(
       process.env.MPESA_SHORTCODE +
@@ -59,46 +62,24 @@ app.post("/pay", async (req, res) => {
     ).toString("base64");
 
     const response = await axios.post(
-
       "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
-
       {
-        BusinessShortCode:
-          process.env.MPESA_SHORTCODE,
-
+        BusinessShortCode: process.env.MPESA_SHORTCODE,
         Password: password,
-
         Timestamp: timestamp,
-
-        TransactionType:
-          "CustomerPayBillOnline",
-
+        TransactionType: "CustomerPayBillOnline",
         Amount: 100,
-
         PartyA: phone,
-
-        PartyB:
-          process.env.MPESA_SHORTCODE,
-
+        PartyB: process.env.MPESA_SHORTCODE,
         PhoneNumber: phone,
-
-        CallBackURL:
-          process.env.CALLBACK_URL,
-
-        AccountReference:
-          "INFINITE",
-
-        TransactionDesc:
-          "INFINITE Seller Access"
+        CallBackURL: process.env.CALLBACK_URL,
+        AccountReference: "INFINITE",
+        TransactionDesc: "INFINITE Seller Access"
       },
-
       {
         headers: {
-          Authorization:
-            "Bearer " + token,
-
-          "Content-Type":
-            "application/json"
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json"
         }
       }
     );
@@ -108,47 +89,32 @@ app.post("/pay", async (req, res) => {
       data: response.data
     });
 
-  } catch(error) {
-
+  } catch (error) {
     console.error(
-      error.response?.data ||
-      error.message
+      error.response?.data || error.message
     );
 
     res.status(500).json({
-      success:false,
-      message:"Payment request failed"
+      success: false,
+      message: "Payment request failed"
     });
-
   }
-
 });
 
-
-app.post("/mpesa/callback", (req,res) => {
-
+app.post("/mpesa/callback", (req, res) => {
   console.log(
     "M-Pesa callback:",
-    JSON.stringify(
-      req.body,
-      null,
-      2
-    )
+    JSON.stringify(req.body, null, 2)
   );
 
   res.json({
-    ResultCode:0,
-    ResultDesc:"Accepted"
+    ResultCode: 0,
+    ResultDesc: "Accepted"
   });
-
 });
 
-
 app.listen(PORT, () => {
-
   console.log(
-    "INFINITE backend running on port " +
-    PORT
+    "INFINITE backend running on port " + PORT
   );
-
 });
