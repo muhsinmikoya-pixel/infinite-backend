@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
+        android:name=".ChestCountApplication"
         android:allowBackup="false"
         android:label="Chest Count"
         android:icon="@drawable/ic_chest_count"
