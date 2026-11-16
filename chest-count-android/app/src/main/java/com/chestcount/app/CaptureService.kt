@@ -113,21 +113,12 @@ class CaptureService : Service() {
             elevation = dp(8).toFloat()
         }
 
-        val iconFrame = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(5).toFloat()
-                setColor(Color.rgb(91, 37, 184))
-                setStroke(dp(1), Color.rgb(173, 127, 255))
-            }
-        }
         val chestIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_chest_count)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        iconFrame.addView(chestIcon, LinearLayout.LayoutParams(dp(38), dp(38)))
-        pill.addView(iconFrame, LinearLayout.LayoutParams(dp(44), dp(44)))
+        // The app icon already contains the purple chest tile shown in the reference.
+        pill.addView(chestIcon, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         val number = TextView(this).apply {
             text = chestCount.toString()
