@@ -40,6 +40,9 @@ class CaptureService : Service() {
     private var counterView: View? = null
     private var counterParams: WindowManager.LayoutParams? = null
     private var chestCount = 0
+    private var counterNumber: TextView? = null
+    private val mainHandler = Handler(android.os.Looper.getMainLooper())
+    private val chestDetector = ChestOpeningDetector()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (projection != null) {
@@ -135,6 +138,7 @@ class CaptureService : Service() {
             setPadding(dp(9), 0, 0, 0)
         }
         pill.addView(number)
+        counterNumber = number
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -216,7 +220,13 @@ class CaptureService : Service() {
                 image = source.acquireLatestImage()
                 if (image != null) {
                     frameCount++
-                    if (frameCount % 60 == 0) {
+                    // Analyse a few frames per second to keep gameplay overhead low.
+                    if (frameCount % 6 == 0 && chestDetector.process(image)) {
+                        chestCount++
+                        mainHandler.post { counterNumber?.text = chestCount.toString() }
+                        Log.i(TAG, "Possible chest opening detected. Count: $chestCount")
+                    }
+                    if (frameCount % 180 == 0) {
                         Log.d(TAG, "Captured $frameCount frames")
                     }
                 }
@@ -258,6 +268,7 @@ class CaptureService : Service() {
                 }
             }
             counterView = null
+            counterNumber = null
             counterParams = null
             windowManager = null
 
