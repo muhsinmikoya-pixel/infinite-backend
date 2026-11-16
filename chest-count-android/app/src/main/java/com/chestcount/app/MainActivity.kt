@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -94,24 +95,46 @@ class MainActivity : Activity() {
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(Color.rgb(7, 12, 29), Color.rgb(19, 20, 48), Color.rgb(9, 15, 32)))
         }
-        root.addView(TextView(this).apply {
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_chest_count)
+            contentDescription = "Chest Count icon"
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }, LinearLayout.LayoutParams(dp(58), dp(58)))
+        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+        }
+        brand.addView(TextView(this).apply {
             text = "CHEST COUNT"
-            textSize = 23f
-            letterSpacing = 0.1f
+            textSize = 22f
+            letterSpacing = 0.02f
             setTextColor(Color.WHITE)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         })
-        root.addView(TextView(this).apply {
-            text = "FORTNITE SESSION COMPANION"
+        brand.addView(TextView(this).apply {
+            text = "🎮  FORTNITE TRACKER"
             textSize = 10f
-            letterSpacing = 0.15f
+            letterSpacing = 0.08f
             setTextColor(Color.rgb(190, 169, 255))
-            setPadding(0, dp(5), 0, dp(20))
+            setPadding(0, dp(3), 0, 0)
+        })
+        header.addView(brand)
+        root.addView(header)
+        root.addView(TextView(this).apply {
+            text = "YOUR SESSION. YOUR LOOT."
+            textSize = 9f
+            letterSpacing = 0.18f
+            setTextColor(Color.rgb(140, 153, 190))
+            setPadding(0, dp(9), 0, dp(14))
         })
 
         val countCard = card()
         countCard.addView(TextView(this).apply {
-            text = "CURRENT SESSION"
+            text = "📦  THIS RUN"
             textSize = 11f
             letterSpacing = 0.12f
             setTextColor(Color.rgb(194, 178, 255))
@@ -125,13 +148,13 @@ class MainActivity : Activity() {
         countView = count
         countCard.addView(count)
         countCard.addView(TextView(this).apply {
-            text = "chests counted this run"
+            text = "📦 chests tracked"
             textSize = 13f
             setTextColor(Color.rgb(185, 192, 218))
         })
         root.addView(countCard, LinearLayout.LayoutParams(-1, -2))
 
-        root.addView(sectionLabel("SESSION CONTROLS"))
+        root.addView(sectionLabel("🎮  CONTROLS"))
         val status = TextView(this).apply {
             text = if (Settings.canDrawOverlays(this@MainActivity))
                 "Ready. Start screen capture when you are in Fortnite."
@@ -198,7 +221,7 @@ class MainActivity : Activity() {
         }
         root.addView(stop, buttonParams())
 
-        root.addView(sectionLabel("RECENT SESSIONS"))
+        root.addView(sectionLabel("◷  HISTORY"))
         val historyBox = card()
         historyContainer = historyBox
         root.addView(historyBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
