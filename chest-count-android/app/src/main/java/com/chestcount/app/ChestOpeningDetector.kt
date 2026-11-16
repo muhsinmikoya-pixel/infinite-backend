@@ -37,6 +37,21 @@ internal class ChestOpeningDetector {
         val area get() = boxWidth * boxHeight
     }
 
+    fun reset() {
+        hasPrevious = false
+        tracked = null
+        stableFrames = 0
+        missingFrames = 0
+        motionSeen = false
+        settledFrames = 0
+        latched = false
+        previousGray.fill(0)
+        currentGray.fill(0)
+        mask.fill(false)
+        closed.fill(false)
+        visited.fill(false)
+    }
+
     fun process(image: Image): Boolean {
         val plane = image.planes.firstOrNull() ?: return false
         val buffer = plane.buffer
