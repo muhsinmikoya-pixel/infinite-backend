@@ -144,14 +144,21 @@ class MainActivity : Activity() {
         statusView = status
         root.addView(status, LinearLayout.LayoutParams(-1, -2))
 
-        val overlayPermission = button("ENABLE FLOATING COUNTER", false)
+        val overlayPermission = button("◉  FLOATING COUNTER ACCESS", false)
         overlayPermission.setOnClickListener { requestOverlayPermission() }
         root.addView(overlayPermission, buttonParams())
 
-        val start = button("START SCREEN CAPTURE", true)
+        val gameAccess = button("🎮  GAME-ONLY DETECTION ACCESS", false)
+        gameAccess.setOnClickListener { requestUsagePermission() }
+        root.addView(gameAccess, buttonParams())
+
+        val start = button("▶  START CAPTURE", true)
         startButton = start
         start.setOnClickListener {
-            if (!Settings.canDrawOverlays(this)) {
+            if (!ForegroundGameGuard(this).hasUsageAccess()) {
+                status.text = "Allow Usage Access so counting pauses outside Fortnite."
+                requestUsagePermission()
+            } else if (!Settings.canDrawOverlays(this)) {
                 status.text = "Please enable Display over other apps, then return here."
                 requestOverlayPermission()
             } else {
@@ -170,7 +177,7 @@ class MainActivity : Activity() {
         }
         root.addView(start, buttonParams(58))
 
-        val move = button("MOVE COUNTER", false)
+        val move = button("✥  MOVE COUNTER", false)
         editButton = move
         move.isEnabled = false
         move.setOnClickListener {
@@ -184,7 +191,7 @@ class MainActivity : Activity() {
         }
         root.addView(move, buttonParams())
 
-        val stop = button("STOP CAPTURE", false)
+        val stop = button("■  STOP CAPTURE", false)
         stop.setOnClickListener {
             status.text = "Stopping capture..."
             stopService(Intent(this, CaptureService::class.java))
@@ -237,6 +244,14 @@ class MainActivity : Activity() {
 
     private fun findHistoryBox(): LinearLayout? = historyContainer
 
+    private fun requestUsagePermission() {
+        try {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } catch (_: Exception) {
+            statusView?.text = "Open Settings > Special access > Usage access > Chest Count."
+        }
+    }
+
     private fun requestOverlayPermission() {
         if (Settings.canDrawOverlays(this)) {
             statusView?.text = "Floating counter permission is already enabled."
@@ -275,8 +290,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (!captureActive && Settings.canDrawOverlays(this)) {
-            statusView?.text = "Overlay permission enabled. You can start capture."
+        if (!captureActive) {
+            statusView?.text = when {
+                !ForegroundGameGuard(this).hasUsageAccess() ->
+                    "Enable Game-only detection access before starting."
+                !Settings.canDrawOverlays(this) ->
+                    "Enable floating counter access before starting."
+                else -> "Ready. Open Fortnite, then start capture."
+            }
         }
     }
 
