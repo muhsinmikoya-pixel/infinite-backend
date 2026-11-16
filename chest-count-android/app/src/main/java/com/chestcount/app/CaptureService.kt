@@ -38,18 +38,13 @@ class CaptureService : Service() {
     private var isStopping = false
     private var windowManager: WindowManager? = null
     private var counterView: View? = null
-    private var counterParams: WindowManager.LayoutParams? = null
     private var chestCount = 0
     private var counterNumber: TextView? = null
     private val mainHandler = Handler(android.os.Looper.getMainLooper())
     private val chestDetector = ChestOpeningDetector()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (projection != null) {
-            Log.w(TAG, "Capture is already running; ignoring duplicate start.")
-            return START_NOT_STICKY
-        }
-
+        if (projection != null) return START_NOT_STICKY
         createNotificationChannel()
 
         try {
@@ -63,9 +58,7 @@ class CaptureService : Service() {
                 startForeground(NOTIFICATION_ID, buildNotification())
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                !android.provider.Settings.canDrawOverlays(this)
-            ) {
+            if (!android.provider.Settings.canDrawOverlays(this)) {
                 throw IllegalStateException("Display-over-other-apps permission is required.")
             }
             showCounterOverlay()
@@ -79,7 +72,6 @@ class CaptureService : Service() {
             }
 
             if (resultData == null || resultCode != android.app.Activity.RESULT_OK) {
-                Log.e(TAG, "Missing or invalid screen-capture permission result.")
                 stopSelf(startId)
                 return START_NOT_STICKY
             }
@@ -87,10 +79,8 @@ class CaptureService : Service() {
             val manager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             projection = manager.getMediaProjection(resultCode, resultData)
-
             projection?.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
-                    Log.i(TAG, "MediaProjection was stopped by the system or user.")
                     stopCapture(stopProjection = false)
                     stopSelf()
                 }
@@ -102,7 +92,6 @@ class CaptureService : Service() {
             stopCapture()
             stopSelf(startId)
         }
-
         return START_NOT_STICKY
     }
 
@@ -112,30 +101,42 @@ class CaptureService : Service() {
 
         val pill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(9), dp(5), dp(12), dp(5))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(6), dp(17), dp(6))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(24).toFloat()
-                setColor(Color.argb(205, 13, 17, 32))
-                setStroke(dp(1), Color.rgb(125, 70, 255))
+                cornerRadius = dp(32).toFloat()
+                setColor(Color.argb(242, 13, 14, 27))
+                setStroke(dp(2), Color.rgb(132, 82, 255))
             }
-            elevation = dp(5).toFloat()
+            elevation = dp(8).toFloat()
         }
 
+        val iconFrame = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(5).toFloat()
+                setColor(Color.rgb(91, 37, 184))
+                setStroke(dp(1), Color.rgb(173, 127, 255))
+            }
+        }
         val chestIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_chest_count)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        pill.addView(chestIcon, LinearLayout.LayoutParams(dp(27), dp(27)))
+        iconFrame.addView(chestIcon, LinearLayout.LayoutParams(dp(38), dp(38)))
+        pill.addView(iconFrame, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         val number = TextView(this).apply {
             text = chestCount.toString()
-            textSize = 19f
+            textSize = 25f
             setTextColor(Color.WHITE)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(dp(9), 0, 0, 0)
+            includeFontPadding = false
+            setPadding(dp(13), 0, 0, 0)
+            minWidth = dp(25)
         }
         pill.addView(number)
         counterNumber = number
@@ -150,7 +151,7 @@ class CaptureService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.END
             x = dp(12)
-            y = dp(110)
+            y = dp(82)
         }
 
         pill.setOnTouchListener(object : View.OnTouchListener {
@@ -158,7 +159,6 @@ class CaptureService : Service() {
             private var startY = 0
             private var touchX = 0f
             private var touchY = 0f
-
             override fun onTouch(view: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -182,7 +182,6 @@ class CaptureService : Service() {
         try {
             windowManager?.addView(pill, params)
             counterView = pill
-            counterParams = params
         } catch (error: Exception) {
             Log.e(TAG, "Could not show floating chest counter.", error)
         }
@@ -194,40 +193,28 @@ class CaptureService : Service() {
     private fun startCapture() {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
-        (getSystemService(WINDOW_SERVICE) as WindowManager)
-            .defaultDisplay.getRealMetrics(metrics)
+        (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(metrics)
 
         val width = metrics.widthPixels.coerceAtLeast(1)
         val height = metrics.heightPixels.coerceAtLeast(1)
-        val density = metrics.densityDpi
-
         val frameWorker = HandlerThread("ChestCountFrames")
         frameWorker.start()
         worker = frameWorker
         val handler = Handler(frameWorker.looper)
 
-        val reader = ImageReader.newInstance(
-            width,
-            height,
-            PixelFormat.RGBA_8888,
-            2
-        )
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         imageReader = reader
-
         reader.setOnImageAvailableListener({ source ->
             var image: android.media.Image? = null
             try {
                 image = source.acquireLatestImage()
                 if (image != null) {
                     frameCount++
-                    // Analyse a few frames per second to keep gameplay overhead low.
-                    if (frameCount % 6 == 0 && chestDetector.process(image)) {
+                    // Sample more often so short chest animations are less likely to be missed.
+                    if (frameCount % 4 == 0 && chestDetector.process(image)) {
                         chestCount++
                         mainHandler.post { counterNumber?.text = chestCount.toString() }
-                        Log.i(TAG, "Possible chest opening detected. Count: $chestCount")
-                    }
-                    if (frameCount % 180 == 0) {
-                        Log.d(TAG, "Captured $frameCount frames")
+                        Log.i(TAG, "Chest event detected. Count: $chestCount")
                     }
                 }
             } catch (error: Exception) {
@@ -237,56 +224,35 @@ class CaptureService : Service() {
             }
         }, handler)
 
-        val display = projection?.createVirtualDisplay(
-            "ChestCountCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            reader.surface,
-            null,
-            handler
-        )
-
-        if (display == null) {
-            throw IllegalStateException("Android did not create the virtual display.")
-        }
-        virtualDisplay = display
+        virtualDisplay = projection?.createVirtualDisplay(
+            "ChestCountCapture", width, height, metrics.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, handler
+        ) ?: throw IllegalStateException("Android did not create the virtual display.")
         Log.i(TAG, "Screen capture started at ${width}x${height}.")
     }
 
     private fun stopCapture(stopProjection: Boolean = true) {
         if (isStopping) return
         isStopping = true
-
         try {
             counterView?.let { view ->
-                try {
-                    windowManager?.removeView(view)
-                } catch (error: Exception) {
+                try { windowManager?.removeView(view) } catch (error: Exception) {
                     Log.w(TAG, "Floating counter was already removed.", error)
                 }
             }
             counterView = null
             counterNumber = null
-            counterParams = null
             windowManager = null
-
             virtualDisplay?.release()
             virtualDisplay = null
-
             imageReader?.setOnImageAvailableListener(null, null)
             imageReader?.close()
             imageReader = null
-
             worker?.quitSafely()
             worker = null
-
             val activeProjection = projection
             projection = null
-            if (stopProjection) {
-                activeProjection?.stop()
-            }
+            if (stopProjection) activeProjection?.stop()
         } finally {
             isStopping = false
         }
@@ -302,12 +268,9 @@ class CaptureService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Chest Count screen capture",
-                NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "Chest Count screen capture", NotificationManager.IMPORTANCE_LOW
             )
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
@@ -318,10 +281,9 @@ class CaptureService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
-
         return builder
-            .setContentTitle("Chest Count is capturing")
-            .setContentText("Floating counter is visible. Chest detection is still being developed.")
+            .setContentTitle("Chest Count is running")
+            .setContentText("The floating chest counter is active over your game.")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()
