@@ -1,8 +1,10 @@
 package com.chestcount.app
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -12,7 +14,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -20,19 +21,43 @@ import android.widget.TextView
 import android.widget.Toast
 
 /**
- * Deliberately uses the platform Activity API for a small, predictable startup path.
- * Screen capture is only started after the user explicitly approves the Android dialog.
+ * Small platform Activity with an explicit, user-approved screen-capture flow.
+ * Capture state is reported by CaptureService instead of assuming a service
+ * start request means capture is already running.
  */
 class MainActivity : Activity() {
     private var statusView: TextView? = null
     private var startButton: Button? = null
     private var projectionManager: MediaProjectionManager? = null
+    private var captureActive = false
+    private var receiverRegistered = false
+
+    private val captureStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != CaptureService.ACTION_STATUS) return
+            val state = intent.getStringExtra(CaptureService.EXTRA_STATUS_STATE) ?: return
+            val message = intent.getStringExtra(CaptureService.EXTRA_STATUS_MESSAGE)
+                ?: "Capture status changed."
+            when (state) {
+                CaptureService.STATUS_RUNNING -> {
+                    captureActive = true
+                    startButton?.text = "CAPTURE RUNNING"
+                }
+                CaptureService.STATUS_STOPPED, CaptureService.STATUS_FAILED -> {
+                    captureActive = false
+                    startButton?.text = "START SCREEN CAPTURE"
+                }
+            }
+            statusView?.text = message
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(8, 11, 24)
         window.navigationBarColor = Color.rgb(8, 11, 24)
 
+        registerCaptureReceiver()
         try {
             projectionManager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -41,6 +66,17 @@ class MainActivity : Activity() {
             android.util.Log.e("ChestCount", "Home screen failed to initialize", error)
             showStartupError(error)
         }
+    }
+
+    private fun registerCaptureReceiver() {
+        val filter = IntentFilter(CaptureService.ACTION_STATUS)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(captureStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(captureStatusReceiver, filter)
+        }
+        receiverRegistered = true
     }
 
     private fun showHomeScreen() {
@@ -133,9 +169,11 @@ class MainActivity : Activity() {
                     val manager = projectionManager
                         ?: getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                     statusView?.text = "Waiting for Android screen-capture approval..."
+                    start.isEnabled = false
                     @Suppress("DEPRECATION")
                     startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE)
                 } catch (error: Exception) {
+                    start.isEnabled = true
                     android.util.Log.e("ChestCount", "Could not request screen capture", error)
                     statusView?.text = "Could not request screen capture: ${error.javaClass.simpleName}"
                 }
@@ -145,9 +183,8 @@ class MainActivity : Activity() {
 
         val stop = makeButton("STOP CAPTURE", false)
         stop.setOnClickListener {
+            statusView?.text = "Stopping capture..."
             stopService(Intent(this, CaptureService::class.java))
-            statusView?.text = "Capture stopped."
-            startButton?.text = "START SCREEN CAPTURE"
         }
         root.addView(stop, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
 
@@ -186,6 +223,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_CAPTURE) return
+        startButton?.isEnabled = true
         if (resultCode != RESULT_OK || data == null) {
             statusView?.text = "Screen capture was cancelled. Nothing is recording."
             return
@@ -200,8 +238,7 @@ class MainActivity : Activity() {
             } else {
                 startService(serviceIntent)
             }
-            statusView?.text = "Capture request sent. Switch to Fortnite after the counter appears."
-            startButton?.text = "CAPTURE REQUESTED"
+            statusView?.text = "Starting capture. Waiting for Android to confirm..."
         } catch (error: Exception) {
             android.util.Log.e("ChestCount", "Could not start capture service", error)
             statusView?.text = "Capture could not start: ${error.javaClass.simpleName}"
@@ -210,9 +247,21 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (Settings.canDrawOverlays(this)) {
+        if (!captureActive && Settings.canDrawOverlays(this)) {
             statusView?.text = "Floating counter permission enabled. You can start capture."
         }
+    }
+
+    override fun onDestroy() {
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(captureStatusReceiver)
+            } catch (error: IllegalArgumentException) {
+                android.util.Log.w("ChestCount", "Capture status receiver was already unregistered.")
+            }
+            receiverRegistered = false
+        }
+        super.onDestroy()
     }
 
     private fun showStartupError(error: Throwable) {
