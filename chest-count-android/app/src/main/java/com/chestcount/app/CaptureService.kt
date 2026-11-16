@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
@@ -17,9 +18,8 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.util.DisplayMetrics
-import android.view.WindowManager
-import android.content.Context
 import android.util.Log
+import android.view.WindowManager
 
 class CaptureService : Service() {
     private var projection: MediaProjection? = null
@@ -27,81 +27,144 @@ class CaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var worker: HandlerThread? = null
     private var frameCount = 0
+    private var isStopping = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createNotificationChannel()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {\n            startForeground(\n                NOTIFICATION_ID,\n                buildNotification(),\n                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION\n            )\n        } else {\n            startForeground(NOTIFICATION_ID, buildNotification())\n        }
-
-        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-        val resultData = if (Build.VERSION.SDK_INT >= 33) {
-            intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent?.getParcelableExtra(EXTRA_RESULT_DATA)
-        }
-
-        if (resultData == null) {
-            stopSelf()
+        if (projection != null) {
+            Log.w(TAG, "Capture is already running; ignoring duplicate start.")
             return START_NOT_STICKY
         }
 
-        val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = manager.getMediaProjection(resultCode, resultData)
-        projection?.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                stopCapture()
-                stopSelf()
-            }
-        }, Handler(mainLooper))
+        createNotificationChannel()
 
-        startCapture()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            }
+
+            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
+            val resultData: Intent? = if (Build.VERSION.SDK_INT >= 33) {
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
+
+            if (resultData == null || resultCode != android.app.Activity.RESULT_OK) {
+                Log.e(TAG, "Missing or invalid screen-capture permission result.")
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+
+            val manager =
+                getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            projection = manager.getMediaProjection(resultCode, resultData)
+
+            projection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.i(TAG, "MediaProjection was stopped by the system or user.")
+                    stopCapture(stopProjection = false)
+                    stopSelf()
+                }
+            }, Handler(mainLooper))
+
+            startCapture()
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to start screen capture.", error)
+            stopCapture()
+            stopSelf(startId)
+        }
+
         return START_NOT_STICKY
     }
 
     private fun startCapture() {
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
-        (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(metrics)
+        (getSystemService(WINDOW_SERVICE) as WindowManager)
+            .defaultDisplay.getRealMetrics(metrics)
 
         val width = metrics.widthPixels.coerceAtLeast(1)
         val height = metrics.heightPixels.coerceAtLeast(1)
         val density = metrics.densityDpi
 
-        worker = HandlerThread("ChestCountFrames").also { it.start() }
-        val handler = Handler(worker!!.looper)
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-        imageReader?.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage()
-            if (image != null) {
-                frameCount++
-                if (frameCount % 60 == 0) {
-                    Log.d(TAG, "Captured $frameCount frames")
+        val frameWorker = HandlerThread("ChestCountFrames")
+        frameWorker.start()
+        worker = frameWorker
+        val handler = Handler(frameWorker.looper)
+
+        val reader = ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            2
+        )
+        imageReader = reader
+
+        reader.setOnImageAvailableListener({ source ->
+            var image: android.media.Image? = null
+            try {
+                image = source.acquireLatestImage()
+                if (image != null) {
+                    frameCount++
+                    if (frameCount % 60 == 0) {
+                        Log.d(TAG, "Captured $frameCount frames")
+                    }
                 }
-                image.close()
+            } catch (error: Exception) {
+                Log.e(TAG, "Error while acquiring a screen frame.", error)
+            } finally {
+                image?.close()
             }
         }, handler)
 
-        virtualDisplay = projection?.createVirtualDisplay(
+        val display = projection?.createVirtualDisplay(
             "ChestCountCapture",
             width,
             height,
             density,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
+            reader.surface,
             null,
             handler
         )
+
+        if (display == null) {
+            throw IllegalStateException("Android did not create the virtual display.")
+        }
+        virtualDisplay = display
+        Log.i(TAG, "Screen capture started at ${width}x${height}.")
     }
 
     private fun stopCapture(stopProjection: Boolean = true) {
-        virtualDisplay?.release()
-        virtualDisplay = null
-        imageReader?.close()
-        imageReader = null
-        worker?.quitSafely()
-        worker = null
-        projection?.stop()
-        projection = null
+        if (isStopping) return
+        isStopping = true
+
+        try {
+            virtualDisplay?.release()
+            virtualDisplay = null
+
+            imageReader?.setOnImageAvailableListener(null, null)
+            imageReader?.close()
+            imageReader = null
+
+            worker?.quitSafely()
+            worker = null
+
+            val activeProjection = projection
+            projection = null
+            if (stopProjection) {
+                activeProjection?.stop()
+            }
+        } finally {
+            isStopping = false
+        }
     }
 
     override fun onDestroy() {
@@ -118,7 +181,8 @@ class CaptureService : Service() {
                 "Chest Count screen capture",
                 NotificationManager.IMPORTANCE_LOW
             )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
         }
     }
 
@@ -129,9 +193,10 @@ class CaptureService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
+
         return builder
             .setContentTitle("Chest Count is capturing")
-            .setContentText("Screen frames are processed on this device. Tap Stop in the app to end.")
+            .setContentText("Screen frames are processed on this device. Stop capture in the app.")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()
