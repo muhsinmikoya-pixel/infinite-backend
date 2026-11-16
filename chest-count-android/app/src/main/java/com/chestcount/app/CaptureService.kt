@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -29,7 +30,7 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {\n            startForeground(\n                NOTIFICATION_ID,\n                buildNotification(),\n                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION\n            )\n        } else {\n            startForeground(NOTIFICATION_ID, buildNotification())\n        }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val resultData = if (Build.VERSION.SDK_INT >= 33) {
@@ -92,7 +93,7 @@ class CaptureService : Service() {
         )
     }
 
-    private fun stopCapture() {
+    private fun stopCapture(stopProjection: Boolean = true) {
         virtualDisplay?.release()
         virtualDisplay = null
         imageReader?.close()
