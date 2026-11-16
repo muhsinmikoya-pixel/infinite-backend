@@ -98,10 +98,10 @@ class MainActivity : ComponentActivity() {
         val headline = TextView(this).apply {
             text = "COUNT EVERY\nCHEST."
             textSize = 34f
-            lineSpacing = dp(1).toFloat()
+            setLineSpacing(dp(1).toFloat(), 1f)
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setTypeface(Typeface.DEFAULT, Typeface.BLACK)
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
             setPadding(0, dp(12), 0, dp(8))
         }
         hero.addView(headline)
