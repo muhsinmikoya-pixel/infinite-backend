@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     private var editMode = false
     private var receiverRegistered = false
     private lateinit var store: ChestCountStore
+    private var historyContainer: LinearLayout? = null
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -192,7 +193,7 @@ class MainActivity : Activity() {
 
         root.addView(sectionLabel("RECENT SESSIONS"))
         val historyBox = card()
-        historyBox.tag = "history"
+        historyContainer = historyBox
         root.addView(historyBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         refreshHistory(historyBox)
 
@@ -234,11 +235,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun findHistoryBox(): LinearLayout? {
-        // The view is rebuilt only on activity creation; history refresh also occurs after stop.
-        val scroll = (window.decorView.findViewWithTag<ScrollView>("root_scroll"))
-        return scroll
-    }
+    private fun findHistoryBox(): LinearLayout? = historyContainer
 
     private fun requestOverlayPermission() {
         if (Settings.canDrawOverlays(this)) {
