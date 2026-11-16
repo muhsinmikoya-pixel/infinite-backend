@@ -5,17 +5,19 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.view.Gravity
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private lateinit var projectionManager: MediaProjectionManager
     private lateinit var status: TextView
 
     private val captureRequest =
-        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
                 val serviceIntent = Intent(this, CaptureService::class.java).apply {
                     putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
@@ -30,7 +32,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        projectionManager =
+            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         val title = TextView(this).apply {
             text = "CHEST COUNT"
