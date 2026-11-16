@@ -7,6 +7,7 @@
     <application
         android:allowBackup="false"
         android:label="Chest Count"
+        android:icon="@drawable/ic_chest_count"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"
