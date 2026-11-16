@@ -46,12 +46,15 @@ class CaptureService : Service() {
     private var overlayParams: WindowManager.LayoutParams? = null
     private var editMode = false
     private lateinit var store: ChestCountStore
+    private lateinit var gameGuard: ForegroundGameGuard
+    private var lastGameForeground: Boolean? = null
     private val mainHandler = Handler(android.os.Looper.getMainLooper())
     private val chestDetector = ChestOpeningDetector()
 
     override fun onCreate() {
         super.onCreate()
         store = ChestCountStore(this)
+        gameGuard = ForegroundGameGuard(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -267,14 +270,33 @@ class CaptureService : Service() {
                 image = source.acquireLatestImage()
                 if (image != null) {
                     frameCount++
-                    if (frameCount % 4 == 0 && chestDetector.process(image)) {
-                        store.addDetected()
-                        val count = store.currentCount()
-                        mainHandler.post {
-                            counterNumber?.text = count.toString()
-                            sendStatus(STATUS_RUNNING, "Chest event detected.")
+                    if (frameCount % 4 == 0) {
+                        val gameForeground = gameGuard.isFortniteForeground()
+                        if (lastGameForeground != gameForeground) {
+                            lastGameForeground = gameForeground
+                            if (!gameForeground) {
+                                // Never carry a tracked chest or pending animation across apps.
+                                chestDetector.reset()
+                            }
+                            mainHandler.post {
+                                if (gameForeground) {
+                                    sendStatus(STATUS_RUNNING, "Fortnite detected. Chest tracking is active.")
+                                } else {
+                                    sendStatus(STATUS_RUNNING, "Detection paused. Return to Fortnite to continue.")
+                                }
+                            }
                         }
-                        Log.i(TAG, "Experimental chest event. Count: $count")
+                        if (gameForeground && chestDetector.process(image)) {
+                            store.addDetected()
+                            val count = store.currentCount()
+                            mainHandler.post {
+                                counterNumber?.text = count.toString()
+                                sendStatus(STATUS_RUNNING, "Chest event detected.")
+                            }
+                            Log.i(TAG, "Experimental chest event. Count: $count")
+                        } else if (!gameForeground) {
+                            // Keep image history fresh only after a full reset when Fortnite returns.
+                        }
                     }
                 }
             } catch (error: Exception) {
