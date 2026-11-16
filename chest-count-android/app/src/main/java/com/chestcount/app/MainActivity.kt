@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -24,7 +26,7 @@ class MainActivity : ComponentActivity() {
                     putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
                 }
                 startForegroundService(serviceIntent)
-                status.text = "Capture started. Check the notification to stop."
+                status.text = "Capture started. The small counter should appear over your game."
             } else {
                 status.text = "Screen capture permission was not granted."
             }
@@ -41,22 +43,46 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
         }
         status = TextView(this).apply {
-            text = "Stage 1: screen-capture test"
+            text = "Stage 2: floating counter test"
             textSize = 16f
             gravity = Gravity.CENTER
+        }
+        val overlayPermission = Button(this).apply {
+            text = "Enable floating counter"
+            setOnClickListener {
+                if (Settings.canDrawOverlays(this@MainActivity)) {
+                    status.text = "Floating counter permission is enabled."
+                } else {
+                    val permissionIntent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                    startActivity(permissionIntent)
+                }
+            }
         }
         val start = Button(this).apply {
             text = "Start screen capture"
             setOnClickListener {
-                status.text = "Waiting for Android permission..."
-                captureRequest.launch(projectionManager.createScreenCaptureIntent())
+                if (!Settings.canDrawOverlays(this@MainActivity)) {
+                    status.text = "First enable 'Display over other apps' for Chest Count."
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName")
+                        )
+                    )
+                } else {
+                    status.text = "Waiting for Android screen-capture permission..."
+                    captureRequest.launch(projectionManager.createScreenCaptureIntent())
+                }
             }
         }
         val stop = Button(this).apply {
-            text = "Stop capture"
+            text = "Stop capture and counter"
             setOnClickListener {
                 stopService(Intent(this@MainActivity, CaptureService::class.java))
-                status.text = "Capture stopped."
+                status.text = "Capture and floating counter stopped."
             }
         }
 
@@ -66,9 +92,17 @@ class MainActivity : ComponentActivity() {
             setPadding(28, 48, 28, 48)
             addView(title)
             addView(status)
+            addView(overlayPermission)
             addView(start)
             addView(stop)
         }
         setContentView(layout)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::status.isInitialized && Settings.canDrawOverlays(this)) {
+            status.text = "Floating counter permission is enabled. Start capture when ready."
+        }
     }
 }
