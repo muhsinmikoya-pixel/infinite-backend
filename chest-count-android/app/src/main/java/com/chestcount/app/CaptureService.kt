@@ -1,5 +1,6 @@
 package com.chestcount.app
 
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -37,6 +38,7 @@ class CaptureService : Service() {
     private var worker: HandlerThread? = null
     private var frameCount = 0
     private var isStopping = false
+    private var failureReported = false
     private var windowManager: WindowManager? = null
     private var counterView: View? = null
     private var chestCount = 0
@@ -45,10 +47,27 @@ class CaptureService : Service() {
     private val chestDetector = ChestOpeningDetector()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (projection != null) return START_NOT_STICKY
-        createNotificationChannel()
+        if (projection != null) {
+            sendStatus(STATUS_RUNNING, "Capture is already running.")
+            return START_NOT_STICKY
+        }
+
+        // Validate the one-time consent result before promoting this service.
+        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
+        val resultData: Intent? = if (Build.VERSION.SDK_INT >= 33) {
+            intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+        }
+        if (resultData == null || resultCode != Activity.RESULT_OK) {
+            reportFailure("Screen-capture approval was missing. Please start again from the app.")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
         try {
+            createNotificationChannel()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -62,42 +81,54 @@ class CaptureService : Service() {
             if (!android.provider.Settings.canDrawOverlays(this)) {
                 throw IllegalStateException("Display-over-other-apps permission is required.")
             }
-            showCounterOverlay()
-
-            val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-            val resultData: Intent? = if (Build.VERSION.SDK_INT >= 33) {
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
-
-            if (resultData == null || resultCode != android.app.Activity.RESULT_OK) {
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
 
             val manager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             projection = manager.getMediaProjection(resultCode, resultData)
-            projection?.registerCallback(object : MediaProjection.Callback() {
+            val activeProjection = projection
+                ?: throw IllegalStateException("Android did not provide a screen-capture session.")
+
+            activeProjection.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
+                    sendStatus(STATUS_STOPPED, "Android stopped screen capture.")
                     stopCapture(stopProjection = false)
                     stopSelf()
                 }
             }, Handler(mainLooper))
 
             startCapture()
+            val overlayVisible = showCounterOverlay()
+            if (overlayVisible) {
+                sendStatus(STATUS_RUNNING, "Screen capture is running. Switch to Fortnite.")
+            } else {
+                sendStatus(STATUS_RUNNING, "Capture is running, but the floating counter could not be displayed.")
+            }
         } catch (error: Exception) {
             Log.e(TAG, "Unable to start screen capture.", error)
+            reportFailure("Capture failed: ${error.javaClass.simpleName}: ${error.message ?: "No details"}")
             stopCapture()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
         }
         return START_NOT_STICKY
     }
 
-    private fun showCounterOverlay() {
-        if (counterView != null) return
+    private fun reportFailure(message: String) {
+        failureReported = true
+        sendStatus(STATUS_FAILED, message)
+    }
+
+    private fun sendStatus(state: String, message: String) {
+        val statusIntent = Intent(ACTION_STATUS).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_STATUS_STATE, state)
+            putExtra(EXTRA_STATUS_MESSAGE, message)
+        }
+        sendBroadcast(statusIntent)
+    }
+
+    private fun showCounterOverlay(): Boolean {
+        if (counterView != null) return true
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         val pill = LinearLayout(this).apply {
@@ -117,7 +148,6 @@ class CaptureService : Service() {
             setImageResource(R.drawable.ic_chest_count)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        // The app icon already contains the purple chest tile shown in the reference.
         pill.addView(chestIcon, LinearLayout.LayoutParams(dp(44), dp(44)))
 
         val number = TextView(this).apply {
@@ -171,11 +201,14 @@ class CaptureService : Service() {
             }
         })
 
-        try {
+        return try {
             windowManager?.addView(pill, params)
             counterView = pill
+            true
         } catch (error: Exception) {
             Log.e(TAG, "Could not show floating chest counter.", error)
+            counterNumber = null
+            false
         }
     }
 
@@ -202,7 +235,6 @@ class CaptureService : Service() {
                 image = source.acquireLatestImage()
                 if (image != null) {
                     frameCount++
-                    // Sample more often so short chest animations are less likely to be missed.
                     if (frameCount % 4 == 0 && chestDetector.process(image)) {
                         chestCount++
                         mainHandler.post { counterNumber?.text = chestCount.toString() }
@@ -228,20 +260,26 @@ class CaptureService : Service() {
         isStopping = true
         try {
             counterView?.let { view ->
-                try { windowManager?.removeView(view) } catch (error: Exception) {
+                try {
+                    windowManager?.removeView(view)
+                } catch (error: Exception) {
                     Log.w(TAG, "Floating counter was already removed.", error)
                 }
             }
             counterView = null
             counterNumber = null
             windowManager = null
+
             virtualDisplay?.release()
             virtualDisplay = null
+
             imageReader?.setOnImageAvailableListener(null, null)
             imageReader?.close()
             imageReader = null
+
             worker?.quitSafely()
             worker = null
+
             val activeProjection = projection
             projection = null
             if (stopProjection) activeProjection?.stop()
@@ -252,6 +290,10 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         stopCapture()
+        if (!failureReported) {
+            sendStatus(STATUS_STOPPED, "Capture stopped.")
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
@@ -284,6 +326,12 @@ class CaptureService : Service() {
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+        const val ACTION_STATUS = "com.chestcount.app.CAPTURE_STATUS"
+        const val EXTRA_STATUS_STATE = "status_state"
+        const val EXTRA_STATUS_MESSAGE = "status_message"
+        const val STATUS_RUNNING = "running"
+        const val STATUS_STOPPED = "stopped"
+        const val STATUS_FAILED = "failed"
         private const val CHANNEL_ID = "chest_count_capture"
         private const val NOTIFICATION_ID = 42
         private const val TAG = "ChestCount"
