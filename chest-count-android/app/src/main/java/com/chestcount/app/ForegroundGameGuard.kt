@@ -50,7 +50,7 @@ internal class ForegroundGameGuard(context: Context) {
     }
 
     companion object {
-        private const val LOOKBACK_MS = 30_000L
+        private const val LOOKBACK_MS = 24L * 60L * 60L * 1000L
         private val FORTNITE_PACKAGES = setOf("com.epicgames.fortnite")
     }
 }
