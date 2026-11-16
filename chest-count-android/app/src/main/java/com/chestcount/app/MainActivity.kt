@@ -21,35 +21,41 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 
-/**
- * Small platform Activity with an explicit, user-approved screen-capture flow.
- * Capture state is reported by CaptureService instead of assuming a service
- * start request means capture is already running.
- */
 class MainActivity : Activity() {
     private var statusView: TextView? = null
+    private var countView: TextView? = null
     private var startButton: Button? = null
+    private var editButton: Button? = null
     private var projectionManager: MediaProjectionManager? = null
     private var captureActive = false
+    private var editMode = false
     private var receiverRegistered = false
+    private lateinit var store: ChestCountStore
 
-    private val captureStatusReceiver = object : BroadcastReceiver() {
+    private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != CaptureService.ACTION_STATUS) return
             val state = intent.getStringExtra(CaptureService.EXTRA_STATUS_STATE) ?: return
-            val message = intent.getStringExtra(CaptureService.EXTRA_STATUS_MESSAGE)
-                ?: "Capture status changed."
+            statusView?.text = intent.getStringExtra(CaptureService.EXTRA_STATUS_MESSAGE) ?: "Status updated."
+            countView?.text = intent.getIntExtra(CaptureService.EXTRA_COUNT, store.currentCount()).toString()
+            editMode = intent.getBooleanExtra(CaptureService.EXTRA_EDIT_MODE, editMode)
+            editButton?.text = if (editMode) "FINISH POSITIONING" else "MOVE COUNTER"
             when (state) {
                 CaptureService.STATUS_RUNNING -> {
                     captureActive = true
                     startButton?.text = "CAPTURE RUNNING"
+                    startButton?.isEnabled = false
+                    editButton?.isEnabled = true
                 }
                 CaptureService.STATUS_STOPPED, CaptureService.STATUS_FAILED -> {
                     captureActive = false
+                    editMode = false
                     startButton?.text = "START SCREEN CAPTURE"
+                    startButton?.isEnabled = true
+                    editButton?.isEnabled = false
+                    refreshHistory()
                 }
             }
-            statusView?.text = message
         }
     }
 
@@ -57,152 +63,181 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(8, 11, 24)
         window.navigationBarColor = Color.rgb(8, 11, 24)
-
+        store = ChestCountStore(this)
         try {
             if (showSavedCrashReport()) return
-            registerCaptureReceiver()
-            projectionManager =
-                getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            showHomeScreen()
+            registerStatusReceiver()
+            projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            showHome()
         } catch (error: Throwable) {
             android.util.Log.e("ChestCount", "Home screen failed to initialize", error)
             showStartupError(error)
         }
     }
 
-    private fun registerCaptureReceiver() {
+    private fun registerStatusReceiver() {
         val filter = IntentFilter(CaptureService.ACTION_STATUS)
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(captureStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(statusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
-            registerReceiver(captureStatusReceiver, filter)
+            registerReceiver(statusReceiver, filter)
         }
         receiverRegistered = true
     }
 
-    private fun showHomeScreen() {
+    private fun showHome() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(24), dp(22), dp(28))
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(7, 12, 29), Color.rgb(18, 19, 48), Color.rgb(9, 15, 32))
-            )
+            setPadding(dp(20), dp(22), dp(20), dp(26))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(7, 12, 29), Color.rgb(19, 20, 48), Color.rgb(9, 15, 32)))
         }
-
-        val brand = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "CHEST COUNT"
-            textSize = 21f
-            letterSpacing = 0.12f
+            textSize = 23f
+            letterSpacing = 0.1f
             setTextColor(Color.WHITE)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
-        }
-        root.addView(brand)
-
-        val eyebrow = TextView(this).apply {
+        })
+        root.addView(TextView(this).apply {
             text = "FORTNITE SESSION COMPANION"
-            textSize = 11f
-            letterSpacing = 0.14f
+            textSize = 10f
+            letterSpacing = 0.15f
             setTextColor(Color.rgb(190, 169, 255))
-            setPadding(0, dp(8), 0, 0)
-        }
-        root.addView(eyebrow)
+            setPadding(0, dp(5), 0, dp(20))
+        })
 
-        val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(20), dp(28), dp(20), dp(28))
-            background = rounded(
-                intArrayOf(Color.rgb(35, 42, 92), Color.rgb(76, 43, 133)),
-                dp(22), Color.rgb(130, 91, 255), dp(1)
-            )
-        }
-        val title = TextView(this).apply {
-            text = "YOUR CHEST\nCOUNT. AT A GLANCE."
-            textSize = 29f
-            gravity = Gravity.CENTER
+        val countCard = card()
+        countCard.addView(TextView(this).apply {
+            text = "CURRENT SESSION"
+            textSize = 11f
+            letterSpacing = 0.12f
+            setTextColor(Color.rgb(194, 178, 255))
+        })
+        val count = TextView(this).apply {
+            text = store.currentCount().toString()
+            textSize = 48f
             setTextColor(Color.WHITE)
             typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         }
-        hero.addView(title)
-        val description = TextView(this).apply {
-            text = "A small companion for reviewing your Fortnite chest runs."
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(225, 222, 255))
-            setPadding(0, dp(12), 0, 0)
-        }
-        hero.addView(description)
-        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
+        countView = count
+        countCard.addView(count)
+        countCard.addView(TextView(this).apply {
+            text = "chests counted this run"
+            textSize = 13f
+            setTextColor(Color.rgb(185, 192, 218))
+        })
+        root.addView(countCard, LinearLayout.LayoutParams(-1, -2))
 
-        val section = TextView(this).apply {
-            text = "SESSION CONTROLS"
-            textSize = 12f
-            letterSpacing = 0.13f
-            setTextColor(Color.rgb(194, 178, 255))
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(26), 0, dp(10))
-        }
-        root.addView(section)
-
+        root.addView(sectionLabel("SESSION CONTROLS"))
         val status = TextView(this).apply {
-            text = "Ready. Enable the floating counter permission before starting capture."
-            textSize = 14f
+            text = if (Settings.canDrawOverlays(this@MainActivity))
+                "Ready. Start screen capture when you are in Fortnite."
+            else "Allow Display over other apps before starting."
+            textSize = 13f
             setTextColor(Color.rgb(229, 231, 245))
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            background = rounded(intArrayOf(Color.rgb(24, 29, 51)), dp(14), Color.rgb(61, 66, 99), dp(1))
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = rounded(Color.rgb(24, 29, 51), dp(13), Color.rgb(61, 66, 99))
         }
         statusView = status
         root.addView(status, LinearLayout.LayoutParams(-1, -2))
 
-        val overlayButton = makeButton("ENABLE FLOATING COUNTER", false)
-        overlayButton.setOnClickListener { requestOverlayPermission() }
-        root.addView(overlayButton, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(16) })
+        val overlayPermission = button("ENABLE FLOATING COUNTER", false)
+        overlayPermission.setOnClickListener { requestOverlayPermission() }
+        root.addView(overlayPermission, buttonParams())
 
-        val start = makeButton("START SCREEN CAPTURE", true)
+        val start = button("START SCREEN CAPTURE", true)
         startButton = start
         start.setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {
-                statusView?.text = "Please enable Display over other apps, then return here."
+                status.text = "Please enable Display over other apps, then return here."
                 requestOverlayPermission()
             } else {
                 try {
                     val manager = projectionManager
                         ?: getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                    statusView?.text = "Waiting for Android screen-capture approval..."
+                    status.text = "Waiting for Android screen-capture approval..."
                     start.isEnabled = false
                     @Suppress("DEPRECATION")
                     startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE)
                 } catch (error: Exception) {
                     start.isEnabled = true
-                    android.util.Log.e("ChestCount", "Could not request screen capture", error)
-                    statusView?.text = "Could not request screen capture: ${error.javaClass.simpleName}"
+                    status.text = "Could not request capture: ${error.javaClass.simpleName}"
                 }
             }
         }
-        root.addView(start, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(10) })
+        root.addView(start, buttonParams(58))
 
-        val stop = makeButton("STOP CAPTURE", false)
+        val move = button("MOVE COUNTER", false)
+        editButton = move
+        move.isEnabled = false
+        move.setOnClickListener {
+            if (!captureActive) return@setOnClickListener
+            editMode = !editMode
+            startService(Intent(this, CaptureService::class.java).apply {
+                action = CaptureService.ACTION_SET_EDIT_MODE
+                putExtra(CaptureService.EXTRA_EDIT_MODE, editMode)
+            })
+            move.text = if (editMode) "FINISH POSITIONING" else "MOVE COUNTER"
+        }
+        root.addView(move, buttonParams())
+
+        val stop = button("STOP CAPTURE", false)
         stop.setOnClickListener {
-            statusView?.text = "Stopping capture..."
+            status.text = "Stopping capture..."
             stopService(Intent(this, CaptureService::class.java))
         }
-        root.addView(stop, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
+        root.addView(stop, buttonParams())
 
-        val note = TextView(this).apply {
-            text = "Chest recognition is experimental. Always check the result against your recording."
-            textSize = 12f
+        root.addView(sectionLabel("RECENT SESSIONS"))
+        val historyBox = card()
+        historyBox.tag = "history"
+        root.addView(historyBox, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        refreshHistory(historyBox)
+
+        root.addView(TextView(this).apply {
+            text = "Detection is experimental and may miss or miscount chests. Review your gameplay to verify results. Sessions stay on this device."
+            textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(151, 161, 190))
-            setPadding(dp(8), dp(22), dp(8), 0)
-        }
-        root.addView(note)
+            setPadding(dp(8), dp(18), dp(8), 0)
+        })
 
         setContentView(ScrollView(this).apply {
             isFillViewport = true
             addView(root)
         })
+    }
+
+    private fun refreshHistory(target: LinearLayout? = null) {
+        val box = target ?: findHistoryBox() ?: return
+        box.removeAllViews()
+        val sessions = store.recentSessions()
+        if (sessions.isEmpty()) {
+            box.addView(TextView(this).apply {
+                text = "No completed sessions yet."
+                textSize = 13f
+                setTextColor(Color.rgb(185, 192, 218))
+            })
+            return
+        }
+        sessions.take(8).forEach { session ->
+            val minutes = session.durationMs / 60000
+            val seconds = (session.durationMs / 1000) % 60
+            box.addView(TextView(this).apply {
+                text = "${session.total} chests  •  ${minutes}m ${seconds}s\nDetected: ${session.detected}   Manual adjustment: ${session.manual}"
+                textSize = 13f
+                setTextColor(Color.rgb(230, 232, 247))
+                setPadding(0, dp(7), 0, dp(7))
+            })
+        }
+    }
+
+    private fun findHistoryBox(): LinearLayout? {
+        // The view is rebuilt only on activity creation; history refresh also occurs after stop.
+        val scroll = (window.decorView.findViewWithTag<ScrollView>("root_scroll"))
+        return scroll
     }
 
     private fun requestOverlayPermission() {
@@ -211,12 +246,9 @@ class MainActivity : Activity() {
             return
         }
         try {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
-        } catch (error: Exception) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")))
+        } catch (_: Exception) {
             statusView?.text = "Open Settings and allow Chest Count to display over other apps."
         }
     }
@@ -235,12 +267,9 @@ class MainActivity : Activity() {
                 putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
                 putExtra(CaptureService.EXTRA_RESULT_DATA, data)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-            statusView?.text = "Starting capture. Waiting for Android to confirm..."
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+            statusView?.text = "Starting capture. Waiting for Android..."
         } catch (error: Exception) {
             android.util.Log.e("ChestCount", "Could not start capture service", error)
             statusView?.text = "Capture could not start: ${error.javaClass.simpleName}"
@@ -250,117 +279,96 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (!captureActive && Settings.canDrawOverlays(this)) {
-            statusView?.text = "Floating counter permission enabled. You can start capture."
+            statusView?.text = "Overlay permission enabled. You can start capture."
         }
     }
 
     override fun onDestroy() {
         if (receiverRegistered) {
-            try {
-                unregisterReceiver(captureStatusReceiver)
-            } catch (error: IllegalArgumentException) {
-                android.util.Log.w("ChestCount", "Capture status receiver was already unregistered.")
-            }
+            try { unregisterReceiver(statusReceiver) } catch (_: IllegalArgumentException) {}
             receiverRegistered = false
         }
         super.onDestroy()
     }
 
     private fun showSavedCrashReport(): Boolean {
-        val reportFile = File(filesDir, ChestCountApplication.CRASH_REPORT_FILE)
-        if (!reportFile.exists()) return false
-        val report = try {
-            reportFile.readText()
-        } catch (error: Exception) {
-            "A previous crash report exists but could not be read: ${error.message}"
-        }
+        val file = File(filesDir, ChestCountApplication.CRASH_REPORT_FILE)
+        if (!file.exists()) return false
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(24), dp(20), dp(24))
             setBackgroundColor(Color.rgb(10, 12, 25))
         }
-        val heading = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "STARTUP CRASH DETAILS"
             textSize = 20f
             setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
-        }
-        root.addView(heading)
-        val explanation = TextView(this).apply {
-            text = "This is the actual error saved from the previous launch. Please send a screenshot of this screen."
-            textSize = 14f
-            setTextColor(Color.rgb(205, 208, 225))
-            setPadding(0, dp(10), 0, dp(14))
-        }
-        root.addView(explanation)
-        val details = TextView(this).apply {
-            text = report
+        })
+        root.addView(TextView(this).apply {
+            text = try { file.readText() } catch (e: Exception) { "Could not read crash report: ${e.message}" }
             textSize = 11f
             setTextColor(Color.rgb(255, 220, 150))
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = rounded(intArrayOf(Color.rgb(24, 28, 44)), dp(12))
-        }
-        root.addView(details)
-        val button = makeButton("CLEAR REPORT AND TRY AGAIN", true)
-        button.setOnClickListener {
-            reportFile.delete()
-            recreate()
-        }
-        root.addView(button, LinearLayout.LayoutParams(-1, dp(54)).apply {
-            topMargin = dp(18)
+            setPadding(0, dp(12), 0, dp(12))
         })
-        setContentView(ScrollView(this).apply {
-            isFillViewport = true
-            addView(root)
-        })
+        val clear = button("CLEAR REPORT AND TRY AGAIN", true)
+        clear.setOnClickListener { file.delete(); recreate() }
+        root.addView(clear, buttonParams())
+        setContentView(ScrollView(this).apply { addView(root) })
         return true
     }
+
     private fun showStartupError(error: Throwable) {
-        val message = "Chest Count couldn't load its home screen.\n\n" +
-            error.javaClass.simpleName + ": " + (error.message ?: "No details") +
-            "\n\nPlease share this message with support."
-        val fallback = TextView(this).apply {
-            text = message
+        setContentView(TextView(this).apply {
+            text = "Chest Count couldn't load.\n\n${error.javaClass.simpleName}: ${error.message ?: "No details"}"
             textSize = 16f
             setTextColor(Color.WHITE)
             setPadding(dp(24), dp(32), dp(24), dp(32))
             setBackgroundColor(Color.rgb(12, 14, 28))
-        }
-        setContentView(fallback)
+        })
         Toast.makeText(this, "Chest Count startup error", Toast.LENGTH_LONG).show()
     }
 
-    private fun makeButton(label: String, primary: Boolean): Button =
-        Button(this).apply {
-            text = label
-            textSize = 13f
-            isAllCaps = false
-            letterSpacing = 0.06f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            background = if (primary) {
-                rounded(intArrayOf(Color.rgb(124, 82, 255), Color.rgb(79, 48, 199)), dp(15))
-            } else {
-                rounded(intArrayOf(Color.rgb(36, 42, 67), Color.rgb(25, 30, 51)), dp(15), Color.rgb(79, 83, 124), dp(1))
-            }
-            stateListAnimator = null
-        }
-
-    private fun rounded(
-        colors: IntArray,
-        radius: Int,
-        strokeColor: Int? = null,
-        strokeWidth: Int = 0
-    ) = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors).apply {
-        cornerRadius = radius.toFloat()
-        if (strokeColor != null) setStroke(strokeWidth, strokeColor)
+    private fun card() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        background = rounded(Color.rgb(24, 29, 51), dp(16), Color.rgb(61, 66, 99))
     }
+
+    private fun sectionLabel(value: String) = TextView(this).apply {
+        text = value
+        textSize = 11f
+        letterSpacing = 0.13f
+        setTextColor(Color.rgb(194, 178, 255))
+        typeface = Typeface.DEFAULT_BOLD
+        setPadding(0, dp(22), 0, dp(9))
+    }
+
+    private fun button(label: String, primary: Boolean) = Button(this).apply {
+        text = label
+        textSize = 12f
+        isAllCaps = false
+        letterSpacing = 0.04f
+        setTextColor(Color.WHITE)
+        typeface = Typeface.DEFAULT_BOLD
+        background = if (primary) rounded(Color.rgb(100, 67, 220), dp(14))
+            else rounded(Color.rgb(36, 42, 67), dp(14), Color.rgb(79, 83, 124))
+        stateListAnimator = null
+    }
+
+    private fun buttonParams(height: Int = 52) =
+        LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(9) }
+
+    private fun rounded(color: Int, radius: Int, stroke: Int? = null) =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius.toFloat()
+            if (stroke != null) setStroke(dp(1), stroke)
+        }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    companion object {
-        private const val REQUEST_CAPTURE = 4012
-    }
+    companion object { private const val REQUEST_CAPTURE = 4012 }
 }
