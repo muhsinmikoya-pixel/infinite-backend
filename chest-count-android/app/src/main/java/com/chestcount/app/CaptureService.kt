@@ -279,6 +279,7 @@ class CaptureService : Service() {
                                 chestDetector.reset()
                             }
                             mainHandler.post {
+                                counterView?.visibility = if (gameForeground) View.VISIBLE else View.GONE
                                 if (gameForeground) {
                                     sendStatus(STATUS_RUNNING, "Fortnite detected. Chest tracking is active.")
                                 } else {
