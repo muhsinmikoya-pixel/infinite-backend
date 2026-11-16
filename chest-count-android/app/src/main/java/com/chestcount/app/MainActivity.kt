@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
                     putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
                 }
                 startForegroundService(serviceIntent)
-                status.text = "Capture started. The small counter should appear over your game."
+                status.text = "Capture started. The chest icon and count 0 are shown in the small floating pill."
             } else {
                 status.text = "Screen capture permission was not granted."
             }
@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
         }
         status = TextView(this).apply {
-            text = "Stage 2: floating counter test"
+            text = "Small floating chest counter. Detection is being built."
             textSize = 16f
             gravity = Gravity.CENTER
         }
