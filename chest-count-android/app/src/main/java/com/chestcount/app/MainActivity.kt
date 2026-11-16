@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
 
 /**
  * Small platform Activity with an explicit, user-approved screen-capture flow.
@@ -57,8 +58,9 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(8, 11, 24)
         window.navigationBarColor = Color.rgb(8, 11, 24)
 
-        registerCaptureReceiver()
         try {
+            if (showSavedCrashReport()) return
+            registerCaptureReceiver()
             projectionManager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             showHomeScreen()
@@ -264,6 +266,57 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    private fun showSavedCrashReport(): Boolean {
+        val reportFile = File(filesDir, ChestCountApplication.CRASH_REPORT_FILE)
+        if (!reportFile.exists()) return false
+        val report = try {
+            reportFile.readText()
+        } catch (error: Exception) {
+            "A previous crash report exists but could not be read: ${error.message}"
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(24), dp(20), dp(24))
+            setBackgroundColor(Color.rgb(10, 12, 25))
+        }
+        val heading = TextView(this).apply {
+            text = "STARTUP CRASH DETAILS"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        root.addView(heading)
+        val explanation = TextView(this).apply {
+            text = "This is the actual error saved from the previous launch. Please send a screenshot of this screen."
+            textSize = 14f
+            setTextColor(Color.rgb(205, 208, 225))
+            setPadding(0, dp(10), 0, dp(14))
+        }
+        root.addView(explanation)
+        val details = TextView(this).apply {
+            text = report
+            textSize = 11f
+            setTextColor(Color.rgb(255, 220, 150))
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(intArrayOf(Color.rgb(24, 28, 44)), dp(12))
+        }
+        root.addView(details)
+        val button = makeButton("CLEAR REPORT AND TRY AGAIN", true)
+        button.setOnClickListener {
+            reportFile.delete()
+            recreate()
+        }
+        root.addView(button, LinearLayout.LayoutParams(-1, dp(54)).apply {
+            topMargin = dp(18)
+        })
+        setContentView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(root)
+        })
+        return true
+    }
     private fun showStartupError(error: Throwable) {
         val message = "Chest Count couldn't load its home screen.\n\n" +
             error.javaClass.simpleName + ": " + (error.message ?: "No details") +
