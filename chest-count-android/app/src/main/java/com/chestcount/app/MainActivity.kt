@@ -8,230 +8,242 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 
-class MainActivity : ComponentActivity() {
-    private lateinit var projectionManager: MediaProjectionManager
-    private lateinit var status: TextView
-    private lateinit var startButton: Button
-
-    private val captureRequest =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                val serviceIntent = Intent(this, CaptureService::class.java).apply {
-                    putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
-                    putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
-                }
-                startForegroundService(serviceIntent)
-                status.text = "Screen capture is running. Open Fortnite to start counting."
-                startButton.text = "CAPTURE RUNNING"
-            } else {
-                status.text = "Screen capture permission was not granted."
-            }
-        }
+/**
+ * Deliberately uses the platform Activity API for a small, predictable startup path.
+ * Screen capture is only started after the user explicitly approves the Android dialog.
+ */
+class MainActivity : Activity() {
+    private var statusView: TextView? = null
+    private var startButton: Button? = null
+    private var projectionManager: MediaProjectionManager? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(8, 11, 24)
         window.navigationBarColor = Color.rgb(8, 11, 24)
-        window.decorView.systemUiVisibility = 0
 
-        projectionManager =
-            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        try {
+            projectionManager =
+                getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            showHomeScreen()
+        } catch (error: Throwable) {
+            android.util.Log.e("ChestCount", "Home screen failed to initialize", error)
+            showStartupError(error)
+        }
+    }
 
+    private fun showHomeScreen() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(24))
+            setPadding(dp(22), dp(24), dp(22), dp(28))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(Color.rgb(7, 12, 29), Color.rgb(18, 19, 48), Color.rgb(9, 15, 32))
             )
         }
 
-        val brandRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val brandIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_chest_count)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-        }
-        brandRow.addView(brandIcon, LinearLayout.LayoutParams(dp(44), dp(44)))
-        val brandName = TextView(this).apply {
+        val brand = TextView(this).apply {
             text = "CHEST COUNT"
-            textSize = 18f
+            textSize = 21f
             letterSpacing = 0.12f
             setTextColor(Color.WHITE)
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            setPadding(dp(12), 0, 0, 0)
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         }
-        brandRow.addView(brandName)
-        root.addView(brandRow)
+        root.addView(brand)
+
+        val eyebrow = TextView(this).apply {
+            text = "FORTNITE SESSION COMPANION"
+            textSize = 11f
+            letterSpacing = 0.14f
+            setTextColor(Color.rgb(190, 169, 255))
+            setPadding(0, dp(8), 0, 0)
+        }
+        root.addView(eyebrow)
 
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(20), dp(30), dp(20), dp(28))
+            setPadding(dp(20), dp(28), dp(20), dp(28))
             background = rounded(
-                intArrayOf(Color.rgb(24, 48, 94), Color.rgb(48, 35, 101), Color.rgb(91, 47, 132)),
-                dp(22), Color.rgb(112, 83, 224), dp(1)
+                intArrayOf(Color.rgb(35, 42, 92), Color.rgb(76, 43, 133)),
+                dp(22), Color.rgb(130, 91, 255), dp(1)
             )
         }
-        val gameLabel = TextView(this).apply {
-            text = "FORTNITE  •  CHEST TRACKER"
-            textSize = 11f
-            letterSpacing = 0.16f
-            setTextColor(Color.rgb(197, 211, 255))
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        }
-        hero.addView(gameLabel)
-        val headline = TextView(this).apply {
-            text = "COUNT EVERY\nCHEST."
-            textSize = 34f
-            setLineSpacing(dp(1).toFloat(), 1f)
+        val title = TextView(this).apply {
+            text = "YOUR CHEST\nCOUNT. AT A GLANCE."
+            textSize = 29f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            setPadding(0, dp(12), 0, dp(8))
+            typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
         }
-        hero.addView(headline)
-        val subtitle = TextView(this).apply {
-            text = "A lightweight counter that stays over your gameplay."
+        hero.addView(title)
+        val description = TextView(this).apply {
+            text = "A small companion for reviewing your Fortnite chest runs."
             textSize = 14f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(218, 224, 255))
+            setTextColor(Color.rgb(225, 222, 255))
+            setPadding(0, dp(12), 0, 0)
         }
-        hero.addView(subtitle)
-        val heroParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(24) }
-        root.addView(hero, heroParams)
+        hero.addView(description)
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
 
-        val sectionTitle = TextView(this).apply {
-            text = "READY TO DROP IN?"
-            textSize = 13f
-            letterSpacing = 0.12f
-            setTextColor(Color.rgb(196, 181, 253))
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            setPadding(dp(2), dp(26), 0, dp(10))
+        val section = TextView(this).apply {
+            text = "SESSION CONTROLS"
+            textSize = 12f
+            letterSpacing = 0.13f
+            setTextColor(Color.rgb(194, 178, 255))
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(26), 0, dp(10))
         }
-        root.addView(sectionTitle)
+        root.addView(section)
 
-        val statusCard = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            background = rounded(intArrayOf(Color.rgb(22, 27, 48)), dp(16), Color.rgb(54, 61, 93), dp(1))
+        val status = TextView(this).apply {
+            text = "Ready. Enable the floating counter permission before starting capture."
+            textSize = 14f
+            setTextColor(Color.rgb(229, 231, 245))
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            background = rounded(intArrayOf(Color.rgb(24, 29, 51)), dp(14), Color.rgb(61, 66, 99), dp(1))
         }
-        val statusDot = TextView(this).apply {
-            text = "●"
-            textSize = 17f
-            setTextColor(Color.rgb(168, 125, 255))
-        }
-        statusCard.addView(statusDot)
-        status = TextView(this).apply {
-            text = "First enable the floating counter, then allow screen capture."
-            textSize = 13f
-            setTextColor(Color.rgb(225, 229, 245))
-            setPadding(dp(10), 0, 0, 0)
-        }
-        statusCard.addView(status, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val statusParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        root.addView(statusCard, statusParams)
+        statusView = status
+        root.addView(status, LinearLayout.LayoutParams(-1, -2))
 
         val overlayButton = makeButton("ENABLE FLOATING COUNTER", false)
-        overlayButton.setOnClickListener {
-            if (Settings.canDrawOverlays(this)) {
-                status.text = "Floating counter permission is enabled. Start capture when ready."
-            } else {
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                )
-            }
-        }
-        val overlayParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
-        ).apply { topMargin = dp(16) }
-        root.addView(overlayButton, overlayParams)
+        overlayButton.setOnClickListener { requestOverlayPermission() }
+        root.addView(overlayButton, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(16) })
 
-        startButton = makeButton("START SCREEN CAPTURE", true)
-        startButton.setOnClickListener {
+        val start = makeButton("START SCREEN CAPTURE", true)
+        startButton = start
+        start.setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {
-                status.text = "Enable 'Display over other apps' first."
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                )
+                statusView?.text = "Please enable Display over other apps, then return here."
+                requestOverlayPermission()
             } else {
-                status.text = "Waiting for Android screen-capture permission..."
-                captureRequest.launch(projectionManager.createScreenCaptureIntent())
+                try {
+                    val manager = projectionManager
+                        ?: getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    statusView?.text = "Waiting for Android screen-capture approval..."
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(manager.createScreenCaptureIntent(), REQUEST_CAPTURE)
+                } catch (error: Exception) {
+                    android.util.Log.e("ChestCount", "Could not request screen capture", error)
+                    statusView?.text = "Could not request screen capture: ${error.javaClass.simpleName}"
+                }
             }
         }
-        val startParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(58)
-        ).apply { topMargin = dp(10) }
-        root.addView(startButton, startParams)
+        root.addView(start, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(10) })
 
-        val stopButton = makeButton("STOP CAPTURE", false)
-        stopButton.setOnClickListener {
+        val stop = makeButton("STOP CAPTURE", false)
+        stop.setOnClickListener {
             stopService(Intent(this, CaptureService::class.java))
-            status.text = "Capture stopped. Your count will reset next time."
-            startButton.text = "START SCREEN CAPTURE"
+            statusView?.text = "Capture stopped."
+            startButton?.text = "START SCREEN CAPTURE"
         }
-        val stopParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
-        ).apply { topMargin = dp(10) }
-        root.addView(stopButton, stopParams)
+        root.addView(stop, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(10) })
 
         val note = TextView(this).apply {
-            text = "Keep Chest Count running, switch to Fortnite, and leave the small counter visible. Detection is still experimental and needs real-game testing."
+            text = "Chest recognition is experimental. Always check the result against your recording."
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(151, 161, 190))
-            setPadding(dp(8), dp(20), dp(8), 0)
+            setPadding(dp(8), dp(22), dp(8), 0)
         }
         root.addView(note)
 
-        val scroll = ScrollView(this).apply {
+        setContentView(ScrollView(this).apply {
             isFillViewport = true
             addView(root)
+        })
+    }
+
+    private fun requestOverlayPermission() {
+        if (Settings.canDrawOverlays(this)) {
+            statusView?.text = "Floating counter permission is already enabled."
+            return
         }
-        setContentView(scroll)
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        } catch (error: Exception) {
+            statusView?.text = "Open Settings and allow Chest Count to display over other apps."
+        }
+    }
+
+    @Deprecated("Uses platform activity result callback for broad Android compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_CAPTURE) return
+        if (resultCode != RESULT_OK || data == null) {
+            statusView?.text = "Screen capture was cancelled. Nothing is recording."
+            return
+        }
+        try {
+            val serviceIntent = Intent(this, CaptureService::class.java).apply {
+                putExtra(CaptureService.EXTRA_RESULT_CODE, resultCode)
+                putExtra(CaptureService.EXTRA_RESULT_DATA, data)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+            statusView?.text = "Capture request sent. Switch to Fortnite after the counter appears."
+            startButton?.text = "CAPTURE REQUESTED"
+        } catch (error: Exception) {
+            android.util.Log.e("ChestCount", "Could not start capture service", error)
+            statusView?.text = "Capture could not start: ${error.javaClass.simpleName}"
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (::status.isInitialized && Settings.canDrawOverlays(this)) {
-            status.text = "Floating counter permission is enabled. Start capture when ready."
+        if (Settings.canDrawOverlays(this)) {
+            statusView?.text = "Floating counter permission enabled. You can start capture."
         }
+    }
+
+    private fun showStartupError(error: Throwable) {
+        val message = "Chest Count couldn't load its home screen.\n\n" +
+            error.javaClass.simpleName + ": " + (error.message ?: "No details") +
+            "\n\nPlease share this message with support."
+        val fallback = TextView(this).apply {
+            text = message
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setPadding(dp(24), dp(32), dp(24), dp(32))
+            setBackgroundColor(Color.rgb(12, 14, 28))
+        }
+        setContentView(fallback)
+        Toast.makeText(this, "Chest Count startup error", Toast.LENGTH_LONG).show()
     }
 
     private fun makeButton(label: String, primary: Boolean): Button =
         Button(this).apply {
             text = label
             textSize = 13f
-            letterSpacing = 0.08f
             isAllCaps = false
+            letterSpacing = 0.06f
             setTextColor(Color.WHITE)
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            typeface = Typeface.DEFAULT_BOLD
             background = if (primary) {
-                rounded(intArrayOf(Color.rgb(119, 75, 255), Color.rgb(82, 52, 204)), dp(16))
+                rounded(intArrayOf(Color.rgb(124, 82, 255), Color.rgb(79, 48, 199)), dp(15))
             } else {
-                rounded(intArrayOf(Color.rgb(35, 42, 68), Color.rgb(26, 31, 53)), dp(16), Color.rgb(79, 83, 124), dp(1))
+                rounded(intArrayOf(Color.rgb(36, 42, 67), Color.rgb(25, 30, 51)), dp(15), Color.rgb(79, 83, 124), dp(1))
             }
             stateListAnimator = null
-            elevation = dp(2).toFloat()
         }
 
     private fun rounded(
@@ -239,13 +251,14 @@ class MainActivity : ComponentActivity() {
         radius: Int,
         strokeColor: Int? = null,
         strokeWidth: Int = 0
-    ): GradientDrawable = GradientDrawable(
-        GradientDrawable.Orientation.LEFT_RIGHT, colors
-    ).apply {
+    ) = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors).apply {
         cornerRadius = radius.toFloat()
         if (strokeColor != null) setStroke(strokeWidth, strokeColor)
     }
 
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val REQUEST_CAPTURE = 4012
+    }
 }
